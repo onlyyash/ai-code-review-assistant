@@ -28,8 +28,15 @@ app.add_middleware(
 @app.post("/submit-code", response_model=CodeFeedback)
 async def submit_code(data: CodeSubmission):
     try:
-        # Step 1: Get raw AI feedback
-        ai_reply = get_gemini_feedback(data.language, data.code)
+        # NEW: read review_mode safely (default = General)
+        review_mode = getattr(data, "review_mode", "General")
+
+        # Step 1: Get raw AI feedback WITH review mode
+        ai_reply = get_gemini_feedback(
+            data.language,
+            data.code,
+            review_mode
+        )
 
         # Step 2: Parse feedback into structured fields
         parsed = parse_ai_feedback(ai_reply)
@@ -56,7 +63,7 @@ async def submit_code(data: CodeSubmission):
                 data.code.strip()
             )
             similarity_score = round(matcher.ratio() * 100, 2)
-            is_similar_to_sample = similarity_score >= 70  # Tune threshold as needed
+            is_similar_to_sample = similarity_score >= 70
 
         # Step 5: Package final response
         feedback = CodeFeedback(
@@ -85,6 +92,7 @@ async def submit_code(data: CodeSubmission):
             similarity_score=similarity_score,
             is_similar_to_sample=is_similar_to_sample
         )
+
         db.add(db_submission)
         db.commit()
         db.refresh(db_submission)
@@ -95,12 +103,12 @@ async def submit_code(data: CodeSubmission):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 # Optional: Seed route for a sample answer
 @app.post("/add-sample-answer")
 def add_sample_answer(data: SampleAnswerCreate):
     db = SessionLocal()
 
-    # Check if sample already exists for that question + language
     existing = db.query(SampleAnswer).filter_by(
         question_title=data.question_title.strip().lower(),
         language=data.language.strip().lower()
@@ -108,7 +116,10 @@ def add_sample_answer(data: SampleAnswerCreate):
 
     if existing:
         db.close()
-        raise HTTPException(status_code=400, detail="Sample answer already exists for this question and language.")
+        raise HTTPException(
+            status_code=400,
+            detail="Sample answer already exists for this question and language."
+        )
 
     sample = SampleAnswer(
         question_title=data.question_title.strip().lower(),
@@ -121,6 +132,7 @@ def add_sample_answer(data: SampleAnswerCreate):
     db.close()
 
     return {"message": "Sample answer added successfully."}
+
 
 @app.get("/sample-questions")
 def get_sample_questions():
@@ -136,6 +148,7 @@ def get_sample_questions():
         }
         for s in samples
     ]
+
 
 @app.get("/submission-history", response_model=List[SubmissionRead])
 def get_history():

@@ -2,10 +2,13 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
+
 class CodeSubmission(BaseModel):
     language: str
     question_title: str
     code: str
+    review_mode: str = "General"
+
 
 class CodeFeedback(BaseModel):
     pass_status: bool
@@ -24,6 +27,7 @@ class SampleAnswerCreate(BaseModel):
     language: str
     ideal_code: str
 
+
 class SubmissionRead(BaseModel):
     id: int
     language: str
@@ -40,5 +44,5 @@ class SubmissionRead(BaseModel):
     is_similar_to_sample: Optional[bool]
 
     model_config = {
-        "from_attributes": True  # ✅ Required for SQLAlchemy objects in Pydantic v2
+        "from_attributes": True
     }

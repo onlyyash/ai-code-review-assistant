@@ -6,8 +6,34 @@ import re
 load_dotenv()
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
-def get_gemini_feedback(language: str, code: str) -> str:
-    prompt = f"Analyze this {language} code and provide:\n- Bugs\n- Suggestions\n- Readability and efficiency score (1-10)\n- Improved version if needed.\n\nCode:\n{code}"
+
+def get_gemini_feedback(language: str, code: str, review_mode: str = "General") -> str:
+    mode_instructions = {
+        "General": "Review the code for correctness, bugs, readability, and efficiency.",
+        "Security": "Focus on security issues (input validation, injection risks, secrets, unsafe functions) and recommend fixes.",
+        "Performance": "Focus on performance bottlenecks, algorithmic complexity, memory usage, and suggest optimizations.",
+        "Code Style": "Focus on code style, maintainability, naming, structure, and best practices for the given language.",
+    }
+
+    instruction = mode_instructions.get(review_mode, mode_instructions["General"])
+
+    prompt = (
+        f"You are a senior software engineer.\n"
+        f"{instruction}\n\n"
+        f"Analyze this {language} code and provide:\n"
+        f"- Bugs\n"
+        f"- Suggestions\n"
+        f"- Readability score (1-10)\n"
+        f"- Efficiency score (1-10)\n"
+        f"- Improved version if needed.\n\n"
+        f"IMPORTANT: Use Markdown headings exactly as:\n"
+        f"### Bugs\n"
+        f"### Suggestions\n"
+        f"### Readability: X/10\n"
+        f"### Efficiency: X/10\n"
+        f"### Improved Version\n\n"
+        f"Code:\n{code}"
+    )
 
     model = genai.GenerativeModel("models/gemini-2.5-pro")
     response = model.generate_content(prompt)
