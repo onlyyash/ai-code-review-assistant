@@ -3,12 +3,14 @@ from functools import lru_cache
 
 from dotenv import load_dotenv
 from google import genai
-from google.genai import types
+from google.genai import errors, types
 from pydantic import BaseModel, Field, ValidationError
 
 load_dotenv()
 
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+# An alias that Google keeps pointing at the current Flash-Lite model (works on the free tier), so the app
+# doesn't break when a specific version is retired.
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest")
 
 MODE_INSTRUCTIONS = {
     "General": "Review the code for correctness, bugs, readability, and efficiency.",
@@ -38,7 +40,9 @@ def _client() -> genai.Client:
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise AIReviewError("GEMINI_API_KEY is not set")
-    return genai.Client(api_key=api_key)
+    # Retry rate limits and temporary overloads with exponential backoff.
+    retry = types.HttpRetryOptions(attempts=4, initial_delay=2, http_status_codes=[429, 500, 503, 504])
+    return genai.Client(api_key=api_key, http_options=types.HttpOptions(retry_options=retry))
 
 
 def build_prompt(language: str, code: str, review_mode: str) -> str:
@@ -60,15 +64,19 @@ def _clamp(score: int) -> int:
 def get_review(language: str, code: str, review_mode: str = "General") -> tuple[ReviewResult, str]:
     """Ask Gemini for a structured review. Returns the parsed result and the
     raw JSON text (kept for the history view)."""
-    response = _client().models.generate_content(
-        model=GEMINI_MODEL,
-        contents=build_prompt(language, code, review_mode),
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            response_schema=ReviewResult,
-            temperature=0.2,
-        ),
-    )
+    try:
+        response = _client().models.generate_content(
+            model=GEMINI_MODEL,
+            contents=build_prompt(language, code, review_mode),
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=ReviewResult,
+                temperature=0.2,
+            ),
+        )
+    except errors.APIError as e:
+        # Invalid key, retired model, quota exceeded, Gemini outage...
+        raise AIReviewError(f"Gemini API error {e.code}: {e.message}") from e
     raw = response.text or ""
     result = response.parsed
     if not isinstance(result, ReviewResult):
