@@ -9,6 +9,27 @@ AI Code Reviewer is a web application that allows developers to submit their cod
 
 ---
 
+## 🔀 About this fork
+
+Forked from [Vashu2003/AI-Code-Reviewer](https://github.com/Vashu2003/AI-Code-Reviewer). The original app, UI and deployment are Vashu Singh's work. This fork adds:
+
+- **Review modes**: General, Security, Performance or Code Style, chosen in the UI and sent to the model as a focused instruction.
+- **Structured model output**: Gemini returns JSON that matches a Pydantic schema (`ReviewResult`) through the `google-genai` SDK. This replaces the regex parsing of Markdown headings, which silently produced empty or wrong fields whenever the model changed its formatting.
+- **Plagiarism-resistant similarity** (`Backend/app/similarity.py`): code is normalised to tokens (identifiers → `ID`, literals → `STR`/`NUM`, comments and docstrings removed) and compared with a token-sequence match and with winnowing fingerprints, the algorithm behind MOSS. A copy with renamed variables, new comments and reordered functions scores 88% (raw `difflib` gave 12%); unrelated code stays around 40%.
+- **Backend fixes**: per-request DB sessions through a FastAPI dependency (sessions used to leak whenever a request failed), a blocking Gemini call no longer run inside `async def`, input validation (unknown review modes and languages get a 422), case-insensitive sample lookup, suggestions stored as JSON (suggestions containing commas used to be split), history sorted newest first with pagination, and automatic columns for databases created by older versions.
+- **Security**: removed a Gemini API key that was hard-coded in `render.yaml`, made CORS origins configurable through `ALLOWED_ORIGINS`, and stopped tracking the local SQLite database.
+- **Tests and CI**: 18 pytest tests, with the Gemini call mocked, run on every push via GitHub Actions.
+
+Run the backend tests:
+
+```bash
+cd Backend
+pip install -r requirements.txt -r requirements-dev.txt
+pytest
+```
+
+---
+
 ## 🌐 Live Demo
 
 🚀 [Live App on Netlify](https://devaudit0.netlify.app/)

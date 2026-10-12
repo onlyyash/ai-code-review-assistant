@@ -9,6 +9,7 @@ const SubmitCode = () => {
   const navigate = useNavigate();
   const [code, setCode] = useState("");
   const [language, setLanguage] = useState("python");
+  const [reviewMode, setReviewMode] = useState("General");
   const [questionTitle, setQuestionTitle] = useState("");
   const [questionOptions, setQuestionOptions] = useState([]);
   const [feedback, setFeedback] = useState(null);
@@ -51,12 +52,16 @@ const SubmitCode = () => {
     try {
       const res = await axios.post(
         `${import.meta.env.VITE_API_BASE_URL}/submit-code`,
-        { code, language, question_title: questionTitle }
+        { code, language, question_title: questionTitle, review_mode: reviewMode }
       );
       setFeedback(res.data);
       setShowFeedback(true);
     } catch (err) {
       console.error("Submission failed:", err);
+      const detail = err.response?.data?.detail;
+      alert(
+        `Review failed: ${typeof detail === "string" ? detail : err.message}`
+      );
     } finally {
       setLoading(false);
     }
@@ -122,6 +127,23 @@ const SubmitCode = () => {
               >
                 <option value="python">🐍 Python</option>
                 <option value="javascript">🚀 JavaScript</option>
+              </select>
+            </div>
+
+            {/* Review Mode */}
+            <div>
+              <label className="text-sm font-medium text-gray-300">
+                Review Focus
+              </label>
+              <select
+                value={reviewMode}
+                onChange={(e) => setReviewMode(e.target.value)}
+                className="w-full bg-gray-800/50 text-white border border-gray-700 rounded-xl px-4 py-3 mt-2 focus:outline-none"
+              >
+                <option value="General">🧭 General</option>
+                <option value="Security">🔒 Security</option>
+                <option value="Performance">⚡ Performance</option>
+                <option value="Code Style">✨ Code Style</option>
               </select>
             </div>
 

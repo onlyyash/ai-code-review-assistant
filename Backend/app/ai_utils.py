@@ -1,79 +1,82 @@
-import google.generativeai as genai
 import os
+from functools import lru_cache
+
 from dotenv import load_dotenv
-import re
+from google import genai
+from google.genai import types
+from pydantic import BaseModel, Field, ValidationError
 
 load_dotenv()
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+
+MODE_INSTRUCTIONS = {
+    "General": "Review the code for correctness, bugs, readability, and efficiency.",
+    "Security": "Focus on security issues (input validation, injection risks, secrets, unsafe functions) and recommend fixes.",
+    "Performance": "Focus on performance bottlenecks, algorithmic complexity, memory usage, and suggest optimizations.",
+    "Code Style": "Focus on code style, maintainability, naming, structure, and best practices for the given language.",
+}
 
 
-def get_gemini_feedback(language: str, code: str, review_mode: str = "General") -> str:
-    mode_instructions = {
-        "General": "Review the code for correctness, bugs, readability, and efficiency.",
-        "Security": "Focus on security issues (input validation, injection risks, secrets, unsafe functions) and recommend fixes.",
-        "Performance": "Focus on performance bottlenecks, algorithmic complexity, memory usage, and suggest optimizations.",
-        "Code Style": "Focus on code style, maintainability, naming, structure, and best practices for the given language.",
-    }
+class ReviewResult(BaseModel):
+    """The shape Gemini is asked to return. Passing this as the response
+    schema makes the model reply with JSON, so there is nothing to scrape
+    out of Markdown."""
+    bugs: list[str] = Field(default_factory=list, description="Concrete bugs or errors, one per item.")
+    suggestions: list[str] = Field(default_factory=list, description="Improvement suggestions, one per item.")
+    readability_score: int = Field(description="Readability from 1 (poor) to 10 (excellent).")
+    efficiency_score: int = Field(description="Efficiency from 1 (poor) to 10 (excellent).")
+    improved_code: str | None = Field(default=None, description="Full improved version of the code, or null if no change is needed.")
 
-    instruction = mode_instructions.get(review_mode, mode_instructions["General"])
 
-    prompt = (
-        f"You are a senior software engineer.\n"
-        f"{instruction}\n\n"
-        f"Analyze this {language} code and provide:\n"
-        f"- Bugs\n"
-        f"- Suggestions\n"
-        f"- Readability score (1-10)\n"
-        f"- Efficiency score (1-10)\n"
-        f"- Improved version if needed.\n\n"
-        f"IMPORTANT: Use Markdown headings exactly as:\n"
-        f"### Bugs\n"
-        f"### Suggestions\n"
-        f"### Readability: X/10\n"
-        f"### Efficiency: X/10\n"
-        f"### Improved Version\n\n"
-        f"Code:\n{code}"
+class AIReviewError(RuntimeError):
+    pass
+
+
+@lru_cache
+def _client() -> genai.Client:
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise AIReviewError("GEMINI_API_KEY is not set")
+    return genai.Client(api_key=api_key)
+
+
+def build_prompt(language: str, code: str, review_mode: str) -> str:
+    instruction = MODE_INSTRUCTIONS.get(review_mode, MODE_INSTRUCTIONS["General"])
+    return (
+        "You are a senior software engineer reviewing a submission.\n"
+        f"{instruction}\n"
+        "Score readability and efficiency from 1 to 10. Only list bugs that are "
+        "actually present; return an empty list if there are none.\n\n"
+        f"Language: {language}\n"
+        f"Code:\n```{language}\n{code}\n```"
     )
 
-    model = genai.GenerativeModel("models/gemini-2.5-pro")
-    response = model.generate_content(prompt)
-    return response.text
+
+def _clamp(score: int) -> int:
+    return max(1, min(10, score))
 
 
-def parse_ai_feedback(text: str) -> dict:
-    # Extract scores
-    readability_match = re.search(r"Readability[:\-]?\s*(\d+)/10", text, re.IGNORECASE)
-    efficiency_match = re.search(r"Efficiency[:\-]?\s*(\d+)/10", text, re.IGNORECASE)
+def get_review(language: str, code: str, review_mode: str = "General") -> tuple[ReviewResult, str]:
+    """Ask Gemini for a structured review. Returns the parsed result and the
+    raw JSON text (kept for the history view)."""
+    response = _client().models.generate_content(
+        model=GEMINI_MODEL,
+        contents=build_prompt(language, code, review_mode),
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=ReviewResult,
+            temperature=0.2,
+        ),
+    )
+    raw = response.text or ""
+    result = response.parsed
+    if not isinstance(result, ReviewResult):
+        try:
+            result = ReviewResult.model_validate_json(raw)
+        except ValidationError as e:
+            raise AIReviewError(f"Model returned an invalid review: {e}") from e
 
-    readability_score = int(readability_match.group(1)) if readability_match else 0
-    efficiency_score = int(efficiency_match.group(1)) if efficiency_match else 0
-
-    # Extract Suggestions
-    suggestions = []
-    if "### Suggestions" in text:
-        suggestions_block = text.split("### Suggestions")[1].split("###")[0]
-        suggestions = re.findall(r"\*{1,2}\s*(.+)", suggestions_block)
-
-    # Extract Bugs
-    errors = []
-    if "### Bugs" in text:
-        bugs_block = text.split("### Bugs")[1].split("###")[0]
-        errors = re.findall(r"\*{1,2}\s*(.+)", bugs_block)
-
-    # Extract corrected code from Improved Version
-    corrected_code = None
-    if "### Improved Version" in text:
-        improved_block = text.split("### Improved Version", 1)[1]
-
-        # Match the first code block inside that section
-        code_match = re.search(r"```(?:[^\n]*)\n(.*?)```", improved_block, re.DOTALL)
-        if code_match:
-            corrected_code = code_match.group(1).strip()
-
-    return {
-        "readability_score": readability_score,
-        "efficiency_score": efficiency_score,
-        "suggestions": suggestions,
-        "errors": errors,
-        "corrected_code": corrected_code
-    }
+    result.readability_score = _clamp(result.readability_score)
+    result.efficiency_score = _clamp(result.efficiency_score)
+    return result, raw

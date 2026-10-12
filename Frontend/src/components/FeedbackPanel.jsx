@@ -11,6 +11,7 @@ export default function FeedbackPanel({ feedback }) {
     corrected_code,
     similarity_score,
     is_similar_to_sample,
+    similarity_details,
   } = feedback;
 
   return (
@@ -105,6 +106,16 @@ export default function FeedbackPanel({ feedback }) {
               >
                 {is_similar_to_sample ? "Similar" : "Not Similar"}
               </span>
+              {similarity_details && (
+                <p className="text-xs text-gray-400 mt-2">
+                  Structure match {similarity_details.token_similarity}% ·
+                  Fingerprint match {similarity_details.fingerprint_similarity}%
+                  <span className="block text-gray-500">
+                    Ignores renamed variables, comments, formatting and
+                    reordered functions.
+                  </span>
+                </p>
+              )}
             </div>
           )}
         </div>
